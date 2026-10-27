@@ -26,12 +26,12 @@ concurrency:
 jobs:
   build:
     name: Bootstrap ${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 360
     permissions:
       contents: read
     env:
-      TERMUX_BUILDER_IMAGE_NAME: ghcr.io/termux/package-builder:latest
+      TERMUX_BUILDER_IMAGE_NAME: ghcr.io/termux/package-builder@sha256:e2de051a518d8b188c59c4a1ecf357d373b9ccf48d6c06d7681fdc3f61a77287
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -58,11 +58,13 @@ jobs:
           FORCE_REBUILD: ${{ inputs.force_rebuild }}
         run: |
           set -euo pipefail
+          mkdir -p "$HOME/.termux-build"
           args=(--architectures "$ARCH")
           if [[ "$FORCE_REBUILD" == "true" ]]; then
             args=(-f "${args[@]}")
           fi
-          ./scripts/run-docker.sh -m ./scripts/build-bootstraps.sh "${args[@]}"
+          export TERMUX_DOCKER_RUN_EXTRA_ARGS="--volume ${HOME}/.termux-build:/home/builder/.termux-build"
+          ./scripts/run-docker.sh ./scripts/build-bootstraps.sh "${args[@]}"
 
       - name: Verify archive and write checksum/manifest
         shell: bash
