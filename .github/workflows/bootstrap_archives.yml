@@ -1,71 +1,115 @@
-name: Generate bootstrap archives (android-7)
+name: Build RTerminal bootstrap (CI only)
 
 on:
-  schedule:
-    - cron: "0 0 * * 0"
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/bootstrap_archives.yml'
+      - 'packages/**'
+      - 'scripts/**'
+      - 'repo.json'
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Rebuild packages even when cached package markers exist'
+        type: boolean
+        required: false
+        default: false
 
-permissions: {} # none
+permissions: {}
 
 concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
+  group: rterminal-bootstrap-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: Bootstrap ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
-      contents: read # actions/upload-artifact doesn't need contents: write
-    runs-on: ubuntu-slim
+      contents: read
+    env:
+      TERMUX_BUILDER_IMAGE_NAME: ghcr.io/termux/package-builder:latest
     strategy:
+      fail-fast: false
+      max-parallel: 4
       matrix:
-        arch:
-          - aarch64
-          - arm
-          - i686
-          - x86_64
-    if: github.repository == 'termux/termux-packages'
+        arch: [aarch64, arm, i686, x86_64]
     steps:
-      - name: Git clone
+      - name: Checkout package recipes
         uses: actions/checkout@v7
-      - name: Create bootstrap archive
-        run: ./scripts/generate-bootstraps.sh --architectures ${{ matrix.arch }}
-      - name: Store artifacts
+
+      - name: Restore source/toolchain downloads only
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.termux-build/_cache
+            ~/.termux-build/*/cache
+          key: rterminal-bootstrap-src-v1-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('scripts/properties.sh', 'scripts/build-bootstraps.sh', 'scripts/Dockerfile', 'packages/**/build.sh') }}
+          restore-keys: |
+            rterminal-bootstrap-src-v1-${{ runner.os }}-${{ matrix.arch }}-
+
+      - name: Build bootstrap from this fork's package sources
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          FORCE_REBUILD: ${{ inputs.force_rebuild }}
+        run: |
+          set -euo pipefail
+          args=(--architectures "$ARCH")
+          if [[ "$FORCE_REBUILD" == "true" ]]; then
+            args=(-f "${args[@]}")
+          fi
+          ./scripts/run-docker.sh -m ./scripts/build-bootstraps.sh "${args[@]}"
+
+      - name: Verify archive and write checksum/manifest
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          archive="bootstrap-${ARCH}.zip"
+          test -s "$archive"
+          unzip -t "$archive"
+          sha256sum "$archive" > "${archive}.sha256"
+          sha256sum -c "${archive}.sha256"
+          image_digest="$(docker image inspect "$TERMUX_BUILDER_IMAGE_NAME" --format='{{range .RepoDigests}}{{println .}}{{end}}' 2>/dev/null | sed -n '1p' || true)"
+          if [[ -z "$image_digest" ]]; then image_digest="unavailable:${TERMUX_BUILDER_IMAGE_NAME}"; fi
+          apt_sources="$(unzip -p "$archive" etc/apt/sources.list | tr '\n' ' ')"
+          if grep -Eq 'packages(-cf)?\.termux\.dev' <<< "$apt_sources"; then
+            echo '::warning::Bootstrap still points at upstream Termux APT; do not distribute or run pkg update against it.'
+          fi
+          cat > "bootstrap-${ARCH}.manifest.txt" <<EOF
+          source_commit=${GITHUB_SHA}
+          architecture=${ARCH}
+          application_id=com.reloot.rterminal
+          builder_image=${TERMUX_BUILDER_IMAGE_NAME}
+          builder_image_digest=${image_digest}
+          archive_sha256=$(sha256sum "$archive" | cut -d ' ' -f1)
+          apt_sources=${apt_sources}
+          EOF
+          cat "bootstrap-${ARCH}.manifest.txt"
+
+      - name: Explain artifact status
+        shell: bash
+        run: |
+          {
+            echo '## RTerminal bootstrap artifact — CI only'
+            echo
+            echo 'This archive is built for `com.reloot.rterminal`, but is not a release. The package fork still points to upstream Termux APT sources; do not use `pkg update` or distribute this archive until a matching RTerminal APT repository is built, signed, and configured.'
+            echo
+            echo 'Only source/toolchain downloads are cached. Package build markers and `.deb` outputs are rebuilt in a clean runner to avoid stale binaries.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload CI-only bootstrap artifact
         uses: actions/upload-artifact@v7
         with:
-          name: bootstrap-archives-${{ matrix.arch }}-${{ github.sha }}
-          path: "*.zip"
-  publish:
-    permissions:
-      contents: write # for git push
-    needs: build
-    runs-on: ubuntu-slim
-    steps:
-      - name: Git clone
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Fetch bootstrap archives
-        uses: actions/download-artifact@v8
-        with:
-          merge-multiple: true
-          path: ./
-      - name: Create new tag
-        id: get_tag
-        run: |
-          new_tag="bootstrap-$(date "+%Y.%m.%d")"
-          existing_tag_revision=$(git tag | grep "$new_tag" | sort -r | head -n 1 | cut -d- -f3 | cut -dr -f2)
-          if [ -n "$existing_tag_revision" ]; then
-            tag_rev=$((existing_tag_revision + 1))
-          else
-            tag_rev=1
-          fi
-          new_tag="${new_tag}-r${tag_rev}+apt.android-7"
-          echo "tag_name=$new_tag" >> $GITHUB_OUTPUT
-      - name: Publish bootstrap zips to GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create ${{ steps.get_tag.outputs.tag_name }} --title "Bootstrap archives for Termux application (apt.android-7)"
-          for file in *.zip; do
-            gh release upload ${{ steps.get_tag.outputs.tag_name }} "$file"
-          done
+          name: rterminal-bootstrap-${{ matrix.arch }}-${{ github.sha }}
+          path: |
+            bootstrap-${{ matrix.arch }}.zip
+            bootstrap-${{ matrix.arch }}.zip.sha256
+            bootstrap-${{ matrix.arch }}.manifest.txt
+          if-no-files-found: error
+          retention-days: 7
