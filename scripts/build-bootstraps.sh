@@ -308,8 +308,8 @@ Available command_options:
 
 
 The package name/prefix that the bootstrap is built for is defined by
-TERMUX_APP_PACKAGE in 'scrips/properties.sh'. It defaults to 'com.termux'.
-If package name is changed, make sure to run
+TERMUX_APP__PACKAGE_NAME in 'scripts/properties.sh'. This RTerminal fork
+sets it to 'com.reloot.rterminal'. If package name is changed, run
 `./scripts/run-docker.sh ./clean.sh` or pass '-f' to force rebuild of packages.
 
 ### Examples
@@ -430,9 +430,7 @@ main() {
 		# Core utilities.
 		PACKAGES+=("bash") # Used by `termux-bootstrap-second-stage.sh`
 		PACKAGES+=("bzip2")
-		if ! ${BOOTSTRAP_ANDROID10_COMPATIBLE}; then
-			PACKAGES+=("command-not-found")
-		else
+		if ${BOOTSTRAP_ANDROID10_COMPATIBLE}; then
 			PACKAGES+=("proot")
 		fi
 		PACKAGES+=("coreutils")
@@ -453,16 +451,7 @@ main() {
 		PACKAGES+=("termux-tools")
 		PACKAGES+=("util-linux")
 
-		# Additional.
-		PACKAGES+=("ed")
-		PACKAGES+=("debianutils")
-		PACKAGES+=("dos2unix")
-		PACKAGES+=("inetutils")
-		PACKAGES+=("lsof")
-		PACKAGES+=("nano")
-		PACKAGES+=("net-tools")
-		PACKAGES+=("patch")
-		PACKAGES+=("unzip")
+		# Optional convenience tools are installed on demand through `pkg`.
 
 		# Handle additional packages.
 		for add_pkg in "${ADDITIONAL_PACKAGES[@]}"; do
