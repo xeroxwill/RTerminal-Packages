@@ -1,6 +1,6 @@
 # RTerminal package recipes (development fork)
 
-> This private development fork sets `TERMUX_APP__PACKAGE_NAME=com.reloot.rterminal` and removes optional convenience tools from the initial bootstrap seed list. **It is not ready for use:** no RTerminal APT repository is published, and `repo.json` still references the upstream Termux repositories. Do not distribute a bootstrap or install packages until a matching RTerminal package repository has been built and configured.
+> This public development fork sets `TERMUX_APP__PACKAGE_NAME=com.reloot.rterminal` and removes optional convenience tools from the initial bootstrap seed list. **It is not ready for use:** no RTerminal APT repository is published, and `repo.json` still references the upstream Termux repositories. Do not distribute a bootstrap or install packages until a matching RTerminal package repository has been built and configured.
 
 This repository contains forked scripts and patches to build packages for the [Termux](https://github.com/termux/termux-app) Android application, adapted for the RTerminal application ID. The package sources remain subject to their upstream licenses and notices.
 
